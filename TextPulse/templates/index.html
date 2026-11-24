@@ -1,0 +1,241 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>TextPulse | Stress Analysis</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+</head>
+<body>
+
+<div class="container">
+    <header>
+        <h1>TextPulse</h1>
+        <p class="subtitle">
+            Understand your stress. Find your next step.
+        </p>
+    </header>
+
+    <nav>
+        <button type="button" class="nav-btn active" data-page="home">Home</button>
+        <button type="button" class="nav-btn" data-page="history">History</button>
+    </nav>
+
+    <main id="home-page">
+        <h2>How are you feeling today?</h2>
+        <p>Describe your thoughts, studies, work or daily situation.</p>
+
+        <textarea id="userText" maxlength="5000"
+            placeholder="Example: I have four assignments due tomorrow and I am worried..."></textarea>
+
+        <button type="button" id="analyzeBtn">Analyze My Text</button>
+
+        <p id="message" role="status"></p>
+
+        <section id="resultSection" class="result" hidden>
+            <h2>Analysis Result</h2>
+            <p id="resultText"></p>
+
+            <h3>Possible Stress Factors</h3>
+            <ul id="factorList"></ul>
+
+            <h3>Text Indicators</h3>
+            <ul id="indicatorList"></ul>
+
+            <h3>Personalized Recommendations</h3>
+            <ul id="recommendationList"></ul>
+
+            <h3>Stress-to-Action Planner</h3>
+            <p>Suggested steps based on your text:</p>
+            <div id="actionList"></div>
+
+            <div id="feedbackArea" hidden>
+                <h3>Does this analysis match your experience?</h3>
+                <button type="button" id="correctBtn">Yes, correct</button>
+                <button type="button" id="incorrectBtn">No, incorrect</button>
+                <p id="feedbackMessage"></p>
+            </div>
+        </section>
+    </main>
+
+    <main id="history-page" hidden>
+        <h2>Your Analysis History</h2>
+        <button type="button" id="loadHistoryBtn">Load History</button>
+        <div id="historyList"></div>
+    </main>
+
+    <footer>
+        TextPulse provides general well-being suggestions,
+        not medical advice or a clinical diagnosis.
+    </footer>
+</div>
+
+<script>
+let currentAnalysisId = null;
+
+const analyzeBtn = document.getElementById("analyzeBtn");
+const message = document.getElementById("message");
+const resultSection = document.getElementById("resultSection");
+
+document.querySelectorAll(".nav-btn").forEach(button => {
+    button.addEventListener("click", () => {
+        document.querySelectorAll(".nav-btn").forEach(btn =>
+            btn.classList.remove("active")
+        );
+
+        button.classList.add("active");
+
+        document.getElementById("home-page").hidden =
+            button.dataset.page !== "home";
+
+        document.getElementById("history-page").hidden =
+            button.dataset.page !== "history";
+    });
+});
+
+function addListItem(listId, value) {
+    const item = document.createElement("li");
+    item.textContent = value;
+    document.getElementById(listId).appendChild(item);
+}
+
+analyzeBtn.addEventListener("click", async () => {
+    const text = document.getElementById("userText").value.trim();
+
+    message.textContent = "Analyzing your text...";
+    resultSection.hidden = true;
+    currentAnalysisId = null;
+    document.getElementById("feedbackArea").hidden = true;
+
+    try {
+        const response = await fetch("/api/analyze", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ text })
+        });
+
+        const data = await response.json();
+
+        if (!response.ok || data.status === "invalid") {
+            message.textContent = data.message;
+            return;
+        }
+
+        if (data.status === "greeting") {
+            message.textContent = data.message;
+            return;
+        }
+
+        message.textContent = "";
+        resultSection.hidden = false;
+
+        document.getElementById("resultText").textContent = data.result;
+
+        ["factorList", "indicatorList", "recommendationList"].forEach(id => {
+            document.getElementById(id).replaceChildren();
+        });
+
+        document.getElementById("actionList").replaceChildren();
+
+        if (data.factors.length === 0) {
+            addListItem("factorList", "No specific factor identified.");
+        }
+
+        data.factors.forEach(factor => {
+            addListItem("factorList", factor.name);
+            factor.indicators.forEach(word => {
+                addListItem("indicatorList", word);
+            });
+        });
+
+        if (data.factors.length === 0) {
+            addListItem("indicatorList", "No specific indicators identified.");
+        }
+
+        data.recommendations.forEach(tip =>
+            addListItem("recommendationList", tip)
+        );
+
+        data.action_plan.forEach(task => {
+            const label = document.createElement("label");
+            const checkbox = document.createElement("input");
+            checkbox.type = "checkbox";
+            label.append(checkbox, " " + task);
+            document.getElementById("actionList").appendChild(label);
+        });
+
+        currentAnalysisId = data.analysis_id;
+        document.getElementById("feedbackArea").hidden = false;
+
+    } catch (error) {
+        message.textContent =
+            "Unable to connect to the server. Please check that Flask is running.";
+    }
+});
+
+async function sendFeedback(value) {
+    if (!currentAnalysisId) return;
+
+    const response = await fetch("/api/feedback", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+            analysis_id: currentAnalysisId,
+            response: value
+        })
+    });
+
+    const data = await response.json();
+    document.getElementById("feedbackMessage").textContent = data.message;
+}
+
+document.getElementById("correctBtn").addEventListener("click", () =>
+    sendFeedback("correct")
+);
+
+document.getElementById("incorrectBtn").addEventListener("click", () =>
+    sendFeedback("incorrect")
+);
+
+document.getElementById("loadHistoryBtn").addEventListener("click", async () => {
+    const list = document.getElementById("historyList");
+    list.replaceChildren();
+
+    try {
+        const response = await fetch("/api/history");
+        const records = await response.json();
+
+        if (records.length === 0) {
+            list.textContent = "No previous analyses yet.";
+            return;
+        }
+
+        records.forEach(record => {
+            const card = document.createElement("div");
+            card.className = "history-card";
+
+            const heading = document.createElement("h3");
+            heading.textContent = record.result;
+
+            const content = document.createElement("p");
+            content.textContent = record.entered_text;
+
+            const factor = document.createElement("p");
+            factor.textContent = "Possible factors: " +
+                (record.factors || "None identified");
+
+            const date = document.createElement("small");
+            date.textContent = record.created_at;
+
+            card.append(heading, content, factor, date);
+            list.appendChild(card);
+        });
+    } catch (error) {
+        list.textContent = "Could not load history.";
+    }
+});
+</script>
+
+</body>
+</html>
